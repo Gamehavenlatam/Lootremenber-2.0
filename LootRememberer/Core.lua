@@ -66,6 +66,31 @@ function LootRememberer:ApplyProfileFromSettings()
     else
         self.db:SetProfile("Global")
     end
+    self:CleanupDuplicateRecords()
+end
+
+function LootRememberer:CleanupDuplicateRecords()
+    local merged = {}
+
+    for itemLink, record in pairs(self.db.profile) do
+        local normalizedLink = self:NormalizeItemLink(itemLink)
+        local existing = merged[normalizedLink]
+
+        if existing == nil then
+            merged[normalizedLink] = record
+        else
+            merged[normalizedLink] = {
+                math.max(existing[1] or 1, record[1] or 1),
+                math.max(existing[2] or 1, record[2] or 1),
+                record[3] or existing[3],
+            }
+        end
+    end
+
+    wipe(self.db.profile)
+    for normalizedLink, record in pairs(merged) do
+        self.db.profile[normalizedLink] = record
+    end
 end
 
 function LootRememberer:OnInitialize()
@@ -283,6 +308,18 @@ function LootRememberer:HookInto(button, rollIdGetter, rollMode)
     end)
 end
 
+local function GetItemID(itemLink)
+    return itemLink and tonumber(itemLink:match("item:(%d+)"))
+end
+
+function LootRememberer:NormalizeItemLink(itemLink)
+    local itemID = GetItemID(itemLink)
+    if itemID then
+        return "item:" .. itemID
+    end
+    return itemLink
+end
+
 function LootRememberer:RecordLootRoll(rollId, rollMode)
     local itemLink = GetLootRollItemLink(rollId)
     self:Trace("RecordLootRoll", rollId, itemLink)
@@ -290,6 +327,8 @@ function LootRememberer:RecordLootRoll(rollId, rollMode)
     if itemLink == nil then
         return false
     end
+
+    itemLink = self:NormalizeItemLink(itemLink)
 
     local _, _, itemCount = GetLootRollItemInfo(rollId)
     local _, _, _, itemLevel = GetItemInfo(itemLink)
@@ -301,8 +340,8 @@ function LootRememberer:RecordLootRoll(rollId, rollMode)
         record = { itemCount or 1, itemLevel or 1, rollMode }
     else
         record = {
-            math.max(record.itemCount, itemCount),
-            math.max(record.itemLevel, itemLevel),
+            math.max(record[1], itemCount or 1),
+            math.max(record[2], itemLevel or 1),
             rollMode
         }
     end
@@ -328,6 +367,7 @@ end
 
 function LootRememberer:DeferredLootRollHandler(rollId)
     local itemLink = GetLootRollItemLink(rollId)
+    itemLink = self:NormalizeItemLink(itemLink)
     local record = self.db.profile[itemLink]
     self:Trace("HandleNewLootRoll", rollId, itemLink, record)
 
